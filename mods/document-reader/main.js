@@ -115,11 +115,6 @@ export default class DocumentReader extends View {
       this.reloadAgain = true;
       return;
     }
-    if (props()?.on) {
-      this.error = "Remote documents are not supported yet; open a local copy";
-      cx.notify();
-      return;
-    }
     if (!this.source || !supported(this.source)) {
       this.error = "Choose a PDF, Word, Excel or PowerPoint document";
       cx.notify();
@@ -132,9 +127,9 @@ export default class DocumentReader extends View {
     cx.notify();
     try {
       const current = this.continuous ? this.visiblePage : this.page;
-      const doc = await openDocument(this.source);
+      const doc = await openDocument(this.source, props()?.on ?? null);
       const page = clamp(current, 1, doc.count);
-      const first = await renderPage(doc, page, this.quality());
+      const first = await renderPage(doc, page, this.quality(doc));
       if (this.closed || generation !== this.generation) return;
       this.doc = doc;
       this.pageCount = doc.count;
@@ -152,7 +147,9 @@ export default class DocumentReader extends View {
       this.scroll.scroll_to_item(page - 1, "top");
       this.pumpPages(cx);
     } catch (error) {
-      if (generation === this.generation) this.error = String(error?.message ?? error);
+      if (generation === this.generation) {
+        this.error = String(error?.message ?? error);
+      }
     } finally {
       if (generation === this.generation) {
         this.loadingDocument = false;
@@ -182,7 +179,7 @@ export default class DocumentReader extends View {
     if (!this.doc || this.checkingSource || this.loadingDocument || this.closed) return;
     this.checkingSource = true;
     try {
-      const signature = await sourceSignature(this.source);
+      const signature = await sourceSignature(this.source, this.doc.on);
       if (!this.closed && this.doc && signature !== this.doc.signature) this.queueReload(cx);
     } catch {
     } finally {
@@ -191,7 +188,7 @@ export default class DocumentReader extends View {
   }
 
   startWatch(cx) {
-    if (!this.source) return;
+    if (!this.source || props()?.on) return;
     const directory = dirname(this.source);
     const source = this.source;
     cx.spawn(async (cx) => {
@@ -206,8 +203,8 @@ export default class DocumentReader extends View {
     });
   }
 
-  quality() {
-    return this.zoom > 1.75 ? 3600 : 1800;
+  quality(doc = this.doc) {
+    return this.zoom > 1.75 ? 3600 : doc?.on ? 1400 : 1800;
   }
 
   ensurePage(page, cx) {
@@ -341,6 +338,11 @@ export default class DocumentReader extends View {
 
   openExternal(cx) {
     if (!this.source) return;
+    if (this.doc?.on || props()?.on) {
+      this.externalError = "External open needs a local copy of this remote document";
+      cx.notify();
+      return;
+    }
     this.externalError = null;
     cx.notify();
     cx.spawn(async (cx) => {
@@ -640,7 +642,7 @@ export default class DocumentReader extends View {
       .child(h_flex().min_h(24).flex_none().px(10).gap(10).items_center().border_t(1).border_color(t.border).text_size(10.5).text_color(t.dim)
         .child(div().child(this.continuous ? `Page ${this.visiblePage}/${this.pageCount} · continuous` : `Page ${this.page}/${this.pageCount} · single`))
         .child(div().flex_1().min_w(0).truncate().text_color(this.externalError || this.error || /no matches|could not|error/i.test(this.searchMessage ?? "") ? t.ansi1 : t.dim).child(this.externalError || (this.doc && this.error) || this.searchMessage || (this.countPrefix ? `Go to ${this.countPrefix}…` : "Auto-reload on · mouse wheel · ? for keys")))
-        .child(div().child(this.doc ? `${this.doc.kind} · ${Math.round(this.zoom * 100)}%` : "")));
+        .child(div().child(this.doc ? `${this.doc.on ? `${this.doc.on} · ` : ""}${this.doc.kind} · ${Math.round(this.zoom * 100)}%` : "")));
   }
 
   searchDialog() {
